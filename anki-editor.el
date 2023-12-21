@@ -709,6 +709,29 @@ and else from variable `anki-editor-prepend-heading'."
       (org-entry-put nil anki-editor-prop-prepend-heading
 		     (symbol-name (not initial-val))))))
 
+(defun anki-editor-show-note-at-point ()
+  "Display the content of an Anki note in a temporary buffer."
+  (interactive)
+  (let ((note (anki-editor-note-at-point))
+        (buffer (get-buffer-create "*anki note*")))
+    (with-current-buffer buffer
+      (erase-buffer)
+      (insert (format "Deck: %s\n" (anki-editor-note-deck note)))
+      (insert (format "Model: %s\n" (anki-editor-note-model note)))
+      (insert (format "ID: %s\n" (anki-editor-note-id note)))
+      (insert (format "Tags: %s\n\n" (anki-editor-note-tags note)))
+      (dolist (field (anki-editor-note-fields note))
+        (insert (format "%s:\n%s\n\n" (car field) (cdr field))))
+      (goto-char (point-min))
+      (org-mode)
+      ;; TODO render forumla
+      (variable-pitch-mode 1)
+      )
+    (switch-to-buffer buffer)
+    (let ((map (make-sparse-keymap)))
+      (define-key map (kbd "q") 'kill-this-buffer)
+      (set-transient-map map t))))
+
 (defun anki-editor-note-at-point ()
   "Make a note struct from current entry."
   (let* ((deck (org-entry-get-with-inheritance anki-editor-prop-deck))
@@ -716,6 +739,7 @@ and else from variable `anki-editor-prepend-heading'."
 	 (prepend-heading (anki-editor-prepend-heading))
          (note-id (org-entry-get nil anki-editor-prop-note-id))
          (note-type (org-entry-get nil anki-editor-prop-note-type))
+         ;; (note-type (org-entry-get-with-inheritance anki-editor-prop-note-type))
          (tags (cl-set-difference (anki-editor--get-tags)
                                   anki-editor-ignored-org-tags
                                   :test #'string=))
@@ -822,10 +846,12 @@ Return a list of cons of (FIELD-NAME . FIELD-CONTENT)."
 Leading whitespace, drawers, and planning content is skipped."
   (save-excursion
     (let* ((element (org-element-at-point))
-	   (begin (cl-loop for eoh = (org-element-property
+	   (begin (cl-loop for prevpos = -1
+			   then eoh
+			   for eoh = (org-element-property
 				      :contents-begin element)
 			   then (org-element-property :end subelem)
-			   while eoh
+			   while (and eoh (> eoh prevpos))
 			   for subelem = (progn
 					   (goto-char eoh)
 					   (org-element-context))
@@ -833,10 +859,12 @@ Leading whitespace, drawers, and planning content is skipped."
 				       '(drawer planning property-drawer))
 			   finally return (and eoh (org-element-property
 						    :begin subelem))))
-	   (end (cl-loop for eoh = (org-element-property
+	   (end (cl-loop for prevpos = -1
+			 then eoh
+			 for eoh = (org-element-property
 				    :contents-begin element)
 			 then (org-element-property :end nextelem)
-			 while eoh
+			 while (and eoh (> eoh prevpos))
 			 for nextelem = (progn
 					  (goto-char eoh)
 					  (org-element-at-point))
@@ -867,95 +895,135 @@ When the `subheading-fields' don't match the `note-type's fields,
 map missing fields to the `heading' and/or `content-before-subheading'.
 Return a list of cons of (FIELD-NAME . FIELD-CONTENT)."
   (anki-editor--with-collection-data-updated
-   (let* ((model-fields (alist-get
-                         note-type anki-editor--model-fields
-                         nil nil #'string=))
-          (property-fields (anki-editor--property-fields model-fields))
-          (named-fields (seq-uniq (append subheading-fields property-fields)
-                                  (lambda (left right)
-                                    (string= (car left) (car right)))))
-          (fields-matching (cl-intersection
+    (let* ((model-fields (alist-get
+                          note-type anki-editor--model-fields
+                          nil nil #'string=))
+           (property-fields (anki-editor--property-fields model-fields))
+           (named-fields (seq-uniq (append subheading-fields property-fields)
+                                   (lambda (left right)
+                                     (string= (car left) (car right)))))
+           (fields-matching (cl-intersection
+                             model-fields (mapcar #'car named-fields)
+                             :test #'string=))
+	   (fields-missing (cl-set-difference
                             model-fields (mapcar #'car named-fields)
-                            :test #'string=))
-	  (fields-missing (cl-set-difference
-                           model-fields (mapcar #'car named-fields)
-			   :test #'string=))
-	  (fields-extra (cl-set-difference
-			 (mapcar #'car named-fields) model-fields
-			 :test #'string=))
-	  (fields (cl-loop for f in fields-matching
-			   collect (cons f (alist-get
-					    f named-fields
-					    nil nil #'string=))))
-	  (heading-format anki-editor-prepend-heading-format))
-     (cond ((equal 0 (length fields-missing))
-	    (when (< 0 (length fields-extra))
-	      (user-error "Failed to map all named fields")))
-	   ((equal 1 (length fields-missing))
-	    (if (equal 0 (length fields-extra))
-		(if (equal "" (string-trim content-before-subheading))
-		    (push (cons (car fields-missing) heading)
-			  fields)
-		  (if prepend-heading
-		      (push (cons (car fields-missing)
-				  (concat
-				   (format heading-format heading)
-				   content-before-subheading))
-			    fields)
-		    (push (cons (car fields-missing)
-				content-before-subheading)
-			  fields)))
-	      (if (equal "" (string-trim content-before-subheading))
-		  (push (cons (car fields-missing)
-			      (anki-editor--concat-fields
-			       fields-extra subheading-fields level))
-			fields)
-		(if prepend-heading
-		    (push (cons (car fields-missing)
-				(concat
-				 (format heading-format heading)
-				 content-before-subheading
-				 (anki-editor--concat-fields
-				  fields-extra subheading-fields
-				  level)))
-			  fields)
-		  (push (cons (car fields-missing)
-			      (concat content-before-subheading
-				      (anki-editor--concat-fields
-				       fields-extra subheading-fields
-				       level)))
-			fields)))))
-	   ((equal 2 (length fields-missing))
-	    (if (equal 0 (length fields-extra))
-		(progn
-		  (push (cons (nth 1 fields-missing)
-			      content-before-subheading)
-			fields)
-		  (push (cons (car fields-missing)
-			      heading)
-			fields))
-	      (if (equal "" (string-trim content-before-subheading))
-		  (progn
-		    (push (cons (nth 1 fields-missing)
-				(anki-editor--concat-fields
-				 fields-extra subheading-fields level))
-			  fields)
-		    (push (cons (car fields-missing)
-				heading)
-			  fields))
-		(progn
-		  (push (cons (nth 1 fields-missing)
-			      (concat content-before-subheading
-				      (anki-editor--concat-fields
-				       fields-extra subheading-fields level)))
-			fields)
-		  (push (cons (car fields-missing)
-			      heading)
-			fields)))))
-	   ((< 2 (length fields-missing))
-	    (user-error (concat "Cannot map note fields: "
-				"more than two fields missing"))))
-     fields)))
+			    :test #'string=))
+	   (fields-extra (cl-set-difference
+			  (mapcar #'car named-fields) model-fields
+			  :test #'string=))
+	   (fields (cl-loop for f in fields-matching
+			    collect (cons f (alist-get
+					     f named-fields
+					     nil nil #'string=))))
+	   (heading-format anki-editor-prepend-heading-format)
+           (content-before-subheading (string-trim content-before-subheading))
+	   (empty-subheading-p (equal "" content-before-subheading))
+           (default-unnamed-input (cond ((and prepend-heading (not empty-subheading-p)) (format "%s\n%s" heading content-before-subheading))
+                                        ((not empty-subheading-p) content-before-subheading)
+                                        (t heading))))
+
+      ;; "Basic" - Front - Back
+      ;; "Basic (and reversed card)" - Front - Back
+      ;; "oneway" - Front - Back - Extra
+      ;; "twoway" - Front - Back - Extra
+      ;; "asymmetric" - Front - Back - Quiz - Extra
+      ;; "cloze-overlap" - Text - Extra- Settings
+      ;; "Cloze" - Text - Back Extra
+      ;; "Cloze (overlapping)" - Original - Title - Remarks - Sources - Settings - Text1 - Text2 - Text3 ...
+      ;; Special treatment for various card type
+      (cond ((string= note-type "Cloze")
+             ;; back extra should be explicit
+             ;; back extra can be ignored
+             (setq fields-missing (remove "Back Extra" fields-missing))
+             (when (member "Text" fields-missing)
+               (push (cons "Text" default-unnamed-input) fields)
+               (setq fields-missing (remove "Text" fields-missing))))
+            ((string= note-type "cloze-overlap")
+             (setq fields-missing (remove "Extra" fields-missing))
+             (when (member "Text" fields-missing)
+               (push (cons "Text" default-unnamed-input) fields)
+               (setq fields-missing (remove "Text" fields-missing)))
+             (when (member "Settings" fields-missing)
+               (push (cons "Settings" "1,0,false,false,false") fields)
+               (setq fields-missing (remove "Settings" fields-missing))))
+            ;; Cloze overlapping, only original is required
+            ((string= note-type "Cloze (overlapping)")
+             (setq fields-missing (cl-remove-if-not (lambda (x) (string= x "Original")) fields-missing))
+             (when (member "Original" fields-missing)
+               (push (cons "Original" default-unnamed-input) fields)
+               (setq fields-missing (remove "Original" fields-missing))))
+            ;; for all other card type, extra can be ignored
+            (t
+             (setq fields-missing (remove "Extra" fields-missing))))
+      (cond ((equal 0 (length fields-missing))
+             ;; it is ok if not all fields are specified
+	     ;; (when (< 0 (length fields-extra)) (user-error "Failed to map all named fields"))
+             )
+	    ((equal 1 (length fields-missing))
+	     (if (equal 0 (length fields-extra))
+	         (if empty-subheading-p
+		     (push (cons (car fields-missing) heading)
+			   fields)
+		   (if prepend-heading
+		       (push (cons (car fields-missing)
+				   (concat
+				    (format heading-format heading)
+				    content-before-subheading))
+			     fields)
+		     (push (cons (car fields-missing)
+			         content-before-subheading)
+			   fields)))
+	       (if (equal "" (string-trim content-before-subheading))
+		   (push (cons (car fields-missing)
+			       (anki-editor--concat-fields
+			        fields-extra subheading-fields level))
+		         fields)
+	         (if prepend-heading
+		     (push (cons (car fields-missing)
+			         (concat
+				  (format heading-format heading)
+				  content-before-subheading
+				  (anki-editor--concat-fields
+				   fields-extra subheading-fields
+				   level)))
+			   fields)
+		   (push (cons (car fields-missing)
+			       (concat content-before-subheading
+				       (anki-editor--concat-fields
+				        fields-extra subheading-fields
+				        level)))
+		         fields)))))
+	    ((equal 2 (length fields-missing))
+	     (if (equal 0 (length fields-extra))
+	         (progn
+		   (push (cons (nth 1 fields-missing)
+			       content-before-subheading)
+		         fields)
+		   (push (cons (car fields-missing)
+			       heading)
+		         fields))
+	       (if (equal "" (string-trim content-before-subheading))
+		   (progn
+		     (push (cons (nth 1 fields-missing)
+			         (anki-editor--concat-fields
+				  fields-extra subheading-fields level))
+			   fields)
+		     (push (cons (car fields-missing)
+			         heading)
+			   fields))
+	         (progn
+		   (push (cons (nth 1 fields-missing)
+			       (concat content-before-subheading
+				       (anki-editor--concat-fields
+				        fields-extra subheading-fields level)))
+		         fields)
+		   (push (cons (car fields-missing)
+			       heading)
+		         fields)))))
+	    ((< 2 (length fields-missing))
+	     (user-error (concat "Cannot map note fields: "
+			         "more than two fields missing"))))
+      fields)))
 
 (defun anki-editor--concat-fields (field-names field-alist level)
   "Concat field names and content of fields in list `field-names'."
