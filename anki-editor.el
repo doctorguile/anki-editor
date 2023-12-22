@@ -931,7 +931,14 @@ Return a list of cons of (FIELD-NAME . FIELD-CONTENT)."
       ;; "Cloze" - Text - Back Extra
       ;; "Cloze (overlapping)" - Original - Title - Remarks - Sources - Settings - Text1 - Text2 - Text3 ...
       ;; Special treatment for various card type
-      (cond ((string= note-type "Cloze")
+      (cond ((string= note-type "cloze")
+             ;; back extra should be explicit
+             ;; back extra can be ignored
+             (setq fields-missing (remove "Extra" fields-missing))
+             (when (member "Text" fields-missing)
+               (push (cons "Text" default-unnamed-input) fields)
+               (setq fields-missing (remove "Text" fields-missing))))
+            ((string= note-type "Cloze")
              ;; back extra should be explicit
              ;; back extra can be ignored
              (setq fields-missing (remove "Back Extra" fields-missing))
