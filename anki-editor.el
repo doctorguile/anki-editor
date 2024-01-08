@@ -927,7 +927,17 @@ Return a list of cons of (FIELD-NAME . FIELD-CONTENT)."
       ;; "oneway" - Front - Back - Extra
       ;; "twoway" - Front - Back - Extra
       ;; "asymmetric" - Front - Back - Quiz - Extra
+
       ;; "cloze-overlap" - Text - Extra- Settings
+
+      ;; Before,After,OnlyContext,RevealAll,InactiveHints
+
+      ;; The number of clozes before the currently active ones to uncover.
+      ;; The number of clozes after the currently active ones to uncover.
+      ;; default show all cloze, set to true to Show clozes only within the context (before + current + after), hide other cloze
+      ;; Reveal all clozes on the back of the card. By default, only currently active clozes are revealed.
+      ;; By default false i.e. only the currently active clozes shows hints
+
       ;; "Cloze" - Text - Back Extra
       ;; "Cloze (overlapping)" - Original - Title - Remarks - Sources - Settings - Text1 - Text2 - Text3 ...
       ;; Special treatment for various card type
@@ -951,7 +961,8 @@ Return a list of cons of (FIELD-NAME . FIELD-CONTENT)."
                (push (cons "Text" default-unnamed-input) fields)
                (setq fields-missing (remove "Text" fields-missing)))
              (when (member "Settings" fields-missing)
-               (push (cons "Settings" "1,0,false,false,false") fields)
+               ;; show all the previous steps of a prove
+               (push (cons "Settings" "50,0,false,false,false") fields)
                (setq fields-missing (remove "Settings" fields-missing))))
             ;; Cloze overlapping, only original is required
             ((string= note-type "Cloze (overlapping)")
