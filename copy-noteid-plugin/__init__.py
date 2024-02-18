@@ -1,5 +1,8 @@
 # ~/Library/Application Support/Anki2/addons21/copy-noteid-plugin
 
+# reference https://github.com/ijgnd/anki__preview_card_edit_note_in_extra_window_linked_from_reviewer/tree/master/src
+# the above adds a copy note id to the browser window
+
 from aqt import mw
 from aqt.utils import showInfo, qconnect, tooltip
 from aqt.qt import *
