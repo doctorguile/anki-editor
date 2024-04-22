@@ -118,7 +118,7 @@ This is only in effect when exactly one note-type field is not found
 among the note subheadings and there is content before the first subheading."
   :type 'boolean)
 
-(defcustom anki-editor-prepend-heading-format "/%s/\n\n"
+(defcustom anki-editor-prepend-heading-format "%s\n" ; "/%s/\n\n"
   "Format string used when prepending note heading.
 It should contain `%s' as placeholder for the heading, see `format'."
   :type 'string)
